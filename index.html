@@ -142,8 +142,7 @@ header .logo{font-size:24px;margin:0}
     <div id="lobbyForm">
       <label for="nameIn">Ton prénom</label>
       <input id="nameIn" maxlength="20" placeholder="Ex : Marine" autocomplete="off">
-      <label>Choisis ta place (une seule fois, elle est gardée ensuite)</label>
-      <div style="display:flex;gap:8px"><button class="primary" id="seat0">Joueur 1</button><button class="primary" id="seat1">Joueur 2</button></div>
+      <div style="display:flex;gap:8px"><button class="primary hidden" id="seat0">Joueur 1</button><button class="primary" id="seat1">Jouer</button></div>
     </div>
     <p id="lobbyErr" class="wait" style="color:var(--bad)"></p>
   </div>
@@ -283,7 +282,7 @@ function seatTaken(){
   claiming=false;try{peer.destroy()}catch(e){};peer=null;role=null;S=null;
   try{localStorage.removeItem(KEY)}catch(e){}
   $('game').classList.add('hidden');$('lobby').classList.remove('hidden');
-  $('lobbyErr').textContent="Cette place est déjà prise : choisis l'autre.";
+  $('lobbyErr').textContent="Cette place est déjà prise sur un autre appareil.";
 }
 
 // Un seul pair réseau par appareil ; un « surveillant » relance tout ce qui tombe.
@@ -661,6 +660,8 @@ document.addEventListener('visibilitychange',()=>{
 // ---------- Démarrage ----------
 function showGame(){$('lobby').classList.add('hidden');$('game').classList.remove('hidden');render();renderChat()}
 function init(){
+  const wantJ1=location.hash==='#j1'; // secours : redevenir Joueur 1
+  if(wantJ1){$('seat0').classList.remove('hidden');$('seat1').textContent='Joueur 2'}
   if(location.hash)history.replaceState(null,'',location.pathname);
   const saved=load();
   if(saved&&saved.role){
