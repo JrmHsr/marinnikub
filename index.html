@@ -345,6 +345,8 @@ function watchdog(){
   tryConnect();
 }
 setInterval(watchdog,4000);
+// Filet de sécurité : la liaison au relais peut mourir sans prévenir sur mobile.
+setInterval(()=>{if(!document.hidden)syncRelay()},30000);
 function setConn(on){connected=on;updConn()}
 function updConn(){
   $('conn').classList.toggle('on',connected||relayOk);
@@ -392,9 +394,10 @@ function handleRelay(ev){
   }else if(ev.topic===TC&&o.m){mergeChat([o.m]);if(fromOther&&o.m.ts>=(S?.chatFrom||0))setOther(o.name)}
 }
 async function syncRelay(){
-  if(!role||syncing)return;syncing=true;
+  if(!role||(syncing&&Date.now()-syncing<15000))return;syncing=Date.now();
+  const ac=new AbortController(),to=setTimeout(()=>ac.abort(),10000);
   try{
-    const r=await fetch(RELAY+TS+','+TC+'/json?poll=1&since='+(relayLast||'12h'));
+    const r=await fetch(RELAY+TS+','+TC+'/json?poll=1&since='+(relayLast||'12h'),{signal:ac.signal});
     if(!r.ok)throw new Error(r.status);
     for(const line of (await r.text()).split(String.fromCharCode(10))){if(line)try{handleRelay(JSON.parse(line))}catch(e){}}
     relayOk=true;
@@ -402,7 +405,7 @@ async function syncRelay(){
     if(S&&(!relBest||newer(S,relBest)))relayState();
     if(pendingChat.length)flushRelay();
   }catch(e){relayOk=false}
-  finally{syncing=false}
+  finally{syncing=false;clearTimeout(to)}
   updConn();
   if(es)es.close();
   es=new EventSource(RELAY+TS+','+TC+'/sse?since='+(relayLast||Math.floor(Date.now()/1000)));
