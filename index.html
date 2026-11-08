@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Marinnikub</title>
+<meta name="theme-color" content="#0c2232">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Marinnikub">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='10' y='4' width='44' height='56' rx='9' fill='%23fbf6ea'/%3E%3Ctext x='32' y='44' font-size='32' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%23ff8a7a'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+:root{
+  --bg:#0f2a3d; --felt:#164a5e; --felt2:#1b5a70; --ink:#f4efe6; --muted:#9fc1cc;
+  --tile:#fbf6ea; --tile-edge:#d9cfb8; --accent:#ff8a7a; --ok:#5fd39b; --bad:#ff6b6b;
+  --c0:#d7263d; --c1:#1b6fd1; --c2:#e08a00; --c3:#1d1d1d;
+  --panel:#0c2232;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:Fredoka,system-ui,sans-serif;overflow:hidden;touch-action:manipulation;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+button{font-family:inherit;cursor:pointer;border:0;border-radius:10px;padding:9px 14px;font-size:15px;font-weight:600;background:#2b6f86;color:var(--ink)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary{background:var(--accent);color:#2a0e0a}
+button.ghost{background:transparent;border:1px solid #3d7487}
+input{font-family:inherit;font-size:16px;padding:10px 12px;border-radius:10px;border:1px solid #3d7487;background:#0b1e2b;color:var(--ink);width:100%}
+.hidden{display:none!important}
+
+/* Lobby */
+#lobby{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;z-index:20;background:radial-gradient(circle at 50% 30%,#1d5d75,#0f2a3d 70%)}
+.card{background:var(--panel);border-radius:18px;padding:26px;max-width:420px;width:100%;box-shadow:0 20px 50px #0008}
+.logo{font-size:42px;font-weight:700;letter-spacing:.5px;margin:0 0 4px;text-align:center}
+.logo span{color:var(--accent)}
+.sub{color:var(--muted);text-align:center;margin:0 0 22px}
+.card label{display:block;font-size:14px;color:var(--muted);margin:14px 0 6px}
+.card button{width:100%;margin-top:16px;padding:12px}
+.linkbox{display:flex;gap:8px;margin-top:8px}
+.linkbox input{font-size:13px}
+.linkbox button{width:auto;margin:0}
+.wait{color:var(--muted);font-size:14px;text-align:center;margin-top:16px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.25}}
+
+/* Game layout */
+#game{display:grid;grid-template-columns:1fr 300px;grid-template-rows:auto 1fr auto;height:100dvh}
+header{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--panel);flex-wrap:wrap}
+header .logo{font-size:24px;margin:0}
+#status{flex:1;font-size:15px;min-width:0}
+#status b{color:var(--accent)}
+#conn{font-size:13px;color:var(--muted);white-space:nowrap}
+#conn i{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--bad);margin-right:5px}
+#conn.on i{background:var(--ok)}
+#chatToggle{display:none;position:relative}
+#chatToggle .badge{position:absolute;top:-5px;right:-5px;background:var(--accent);color:#2a0e0a;border-radius:9px;font-size:11px;padding:1px 6px}
+
+#boardWrap{overflow:auto;padding:16px;background:radial-gradient(circle at 50% 40%,var(--felt2),var(--felt) 75%)}
+#board{display:flex;flex-wrap:wrap;gap:14px;align-content:flex-start}
+.set{display:flex;gap:3px;padding:6px;border-radius:12px;background:#0003;border:2px solid transparent}
+.set.valid{border-color:#5fd39b55}
+.set.invalid{border-color:var(--bad)}
+.slot{width:38px;height:52px;border:2px dashed #ffffff55;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#ffffffaa;font-size:22px;cursor:pointer}
+.slot:hover{background:#ffffff14}
+#newSet{display:flex;align-items:center;justify-content:center;min-width:150px;height:68px;border:2px dashed #ffffff55;border-radius:12px;color:#ffffffbb;cursor:pointer;padding:0 14px;font-size:15px}
+#newSet:hover{background:#ffffff14}
+.empty-board{color:#ffffff88;font-size:15px;padding:8px}
+
+.tile{width:38px;height:52px;background:linear-gradient(#fffdf6,var(--tile));border-radius:7px;box-shadow:0 2px 0 var(--tile-edge),0 3px 6px #0005;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;user-select:none;position:relative;transition:transform .08s}
+.tile.c0{color:var(--c0)}.tile.c1{color:var(--c1)}.tile.c2{color:var(--c2)}.tile.c3{color:var(--c3)}
+.tile.j{font-size:24px;background:linear-gradient(135deg,#ffe3ec,#fff4d6)}
+.tile.j::after{content:"";}
+.tile.click{cursor:pointer}
+.tile.sel{transform:translateY(-6px);box-shadow:0 0 0 3px var(--accent),0 6px 10px #0006}
+.tile.fresh::before{content:"";position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+
+#bottom{grid-column:1/2;background:var(--panel);padding:10px 16px 14px;border-top:1px solid #ffffff12}
+#actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+#msg{flex:1;min-width:150px;font-size:14px;color:var(--muted)}
+#msg.err{color:var(--bad)}
+#rackHead{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);margin-bottom:6px;gap:8px;flex-wrap:wrap}
+#rackHead button{padding:5px 10px;font-size:13px}
+#rackHead button.on{background:var(--accent);color:#2a0e0a;border-color:var(--accent)}
+#rack{display:flex;flex-wrap:wrap;gap:5px;min-height:58px;padding:6px;border-radius:12px;background:#ffffff0c}
+#rack.target{outline:2px dashed var(--accent);cursor:pointer}
+
+/* Chat */
+#chat{grid-row:2/4;grid-column:2;display:flex;flex-direction:column;background:var(--panel);border-left:1px solid #ffffff12;min-height:0}
+#chat h3{margin:0;padding:12px 14px;font-size:16px;border-bottom:1px solid #ffffff12;display:flex;justify-content:space-between;align-items:center}
+#chatClose{display:none;padding:4px 10px}
+#msgs{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.m{max-width:85%;padding:7px 11px;border-radius:14px;background:#1f4a5c;font-size:15px;line-height:1.3;word-wrap:break-word;align-self:flex-start}
+.m.me{background:#7a3b45;align-self:flex-end}
+.m small{display:block;font-size:11px;color:#ffffff99;margin-bottom:2px}
+.m.sys{background:transparent;color:var(--muted);font-size:13px;align-self:center;text-align:center}
+#chatForm{display:flex;gap:6px;padding:10px;border-top:1px solid #ffffff12}
+#chatForm button{padding:9px 12px}
+
+#overlay{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:30;padding:16px}
+#overlay .card{text-align:center}
+
+@media (max-width:820px){
+  #game{grid-template-columns:1fr}
+  #bottom{grid-column:1}
+  #chat{position:fixed;inset:0;z-index:15;border:0;grid-row:auto;grid-column:auto}
+  #chat.closed{display:none}
+  #chatToggle,#chatClose{display:inline-block}
+  .tile,.slot{width:34px;height:47px;font-size:20px}
+  .tile.j{font-size:21px}
+  header{padding:calc(6px + env(safe-area-inset-top)) 12px 6px;gap:8px}
+  header .logo{font-size:19px}
+  #status{order:5;flex-basis:100%;font-size:14px}
+  #conn span{display:none}
+  #score{font-size:12px!important;margin-left:auto}
+  header button{padding:6px 10px;font-size:14px}
+  #boardWrap{padding:10px}
+  #board{gap:8px}
+  .set{padding:4px;gap:2px}
+  #newSet{height:58px;min-width:120px;font-size:14px}
+  #bottom{padding:8px 10px calc(10px + env(safe-area-inset-bottom))}
+  #actions{gap:6px;margin-bottom:6px}
+  #actions button{flex:1;padding:11px 6px}
+  #msg{flex-basis:100%;order:5;min-height:0}
+  #msg:empty{display:none}
+  #rack{gap:4px;padding:5px;max-height:34dvh;overflow:auto}
+  #chat{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+  #chat h3{font-size:18px}
+  #chatClose{font-size:16px;padding:6px 14px}
+}
+</style>
+</head>
+<body>
+
+<div id="lobby">
+  <div class="card">
+    <p class="logo">Marinni<span>kub</span></p>
+    <p class="sub">Rummikub en ligne, 1 contre 1</p>
+    <div id="lobbyForm">
+      <label for="nameIn">Ton prénom</label>
+      <input id="nameIn" maxlength="20" placeholder="Ex : Marine" autocomplete="off">
+      <button class="primary" id="goBtn">Créer une partie</button>
+    </div>
+    <div id="lobbyWait" class="hidden">
+      <label>Envoie ce lien à ton amie :</label>
+      <div class="linkbox"><input id="shareLink" readonly><button id="copyBtn">Copier</button></div>
+      <button id="shareBtn" class="ghost hidden">Partager…</button>
+      <p class="wait"><span class="dot"></span> En attente de ton adversaire…</p>
+    </div>
+    <p id="lobbyErr" class="wait" style="color:var(--bad)"></p>
+  </div>
+</div>
+
+<div id="game" class="hidden">
+  <header>
+    <p class="logo">Marinni<span style="color:var(--accent)">kub</span></p>
+    <div id="status"></div>
+    <div id="conn"><i></i><span>Hors ligne</span></div>
+    <span id="score" style="font-size:13px;color:var(--muted)"></span>
+    <button id="rulesBtn" class="ghost">Règles</button>
+    <button id="chatToggle" class="ghost">💬<span class="badge hidden" id="badge">0</span></button>
+  </header>
+  <div id="boardWrap"><div id="board"></div></div>
+  <div id="bottom">
+    <div id="actions">
+      <button class="primary" id="validateBtn">Valider</button>
+      <button id="drawBtn">Piocher</button>
+      <button class="ghost" id="resetBtn">Annuler</button>
+      <span id="msg"></span>
+    </div>
+    <div id="rackHead">
+      <span id="rackInfo">Ton chevalet</span>
+      <span>
+        <button class="ghost" id="backBtn">↩ Reprendre</button>
+        <button class="ghost" id="sortRun" title="Range par couleur puis par nombre : les suites apparaissent">Suites</button>
+        <button class="ghost" id="sortGrp" title="Range par nombre : les groupes de même nombre apparaissent">Groupes</button>
+      </span>
+    </div>
+    <div id="rack"></div>
+  </div>
+  <aside id="chat" class="closed">
+    <h3>Messages <button id="chatClose" class="ghost">✕</button></h3>
+    <div id="msgs"></div>
+    <form id="chatForm"><input id="chatIn" maxlength="500" placeholder="Écrire un message…" autocomplete="off"><button class="primary">➤</button></form>
+  </aside>
+</div>
+
+<div id="overlay" class="hidden"><div class="card"><p class="logo" id="ovTitle"></p><p class="sub" id="ovText"></p><button class="primary" id="ovBtn">Manche suivante</button></div></div>
+
+<div id="rules" class="hidden" style="position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:40;padding:16px">
+  <div class="card" style="max-width:560px;max-height:90dvh;overflow:auto;text-align:left;line-height:1.45;font-size:15px">
+    <p class="logo" style="font-size:28px">Règles</p>
+    <p><b>Matériel :</b> 106 tuiles — les nombres 1 à 13 en 4 couleurs, en double, plus 2 jokers. Chaque joueur reçoit 14 tuiles. Le premier joueur est tiré au sort.</p>
+    <p><b>Combinaisons (3 tuiles minimum) :</b><br>• <b>Suite</b> : nombres qui se suivent, même couleur (ex. 4-5-6 bleus). Le 1 ne suit pas le 13.<br>• <b>Groupe</b> : même nombre, couleurs toutes différentes (3 ou 4 tuiles).</p>
+    <p><b>Première pose :</b> au moins <b>30 points</b> (valeur des tuiles), uniquement avec tes propres tuiles, sans toucher au plateau.</p>
+    <p><b>Ensuite :</b> tu peux réorganiser librement tout le plateau (ajouter, couper, déplacer, échanger) à condition qu'à la fin de ton tour, toutes les combinaisons soient valides et que tu aies posé au moins une tuile de ton chevalet. Les tuiles du plateau ne peuvent jamais revenir dans ton chevalet.</p>
+    <p><b>Joker :</b> remplace n'importe quelle tuile. Un joker récupéré sur le plateau doit être rejoué dans le même tour.</p>
+    <p><b>Si tu ne peux pas (ou ne veux pas) jouer :</b> tu pioches une tuile et ton tour se termine.</p>
+    <p><b>Fin de manche :</b> le premier qui pose toutes ses tuiles gagne. L'autre perd la valeur de son chevalet (joker = 30 points), que le gagnant marque. Si la pioche est vide et que personne ne peut jouer, celui qui a le moins de points en main gagne la manche.</p>
+    <p style="color:var(--muted);font-size:14px"><b>Comment jouer ici :</b> touche des tuiles pour les sélectionner, puis touche « + » au bout d'une combinaison pour les y ajouter, ou « + Nouvelle combinaison ». « ↩ Reprendre » renvoie dans ton chevalet les tuiles posées ce tour-ci. « Annuler » remet tout comme au début du tour.</p>
+    <button class="primary" id="rulesClose">J'ai compris</button>
+  </div>
+</div>
+
+<script>
+// ---------- Tuiles ----------
+const COLORS=['rouge','bleu','orange','noir'];
+const TILES=[];
+for(let k=0;k<2;k++)for(let c=0;c<4;c++)for(let n=1;n<=13;n++)TILES.push({id:TILES.length,c,n,j:false});
+TILES.push({id:104,c:-1,n:0,j:true},{id:105,c:-1,n:0,j:true});
+const T=id=>TILES[id];
+
+function shuffle(a){const r=new Uint32Array(a.length);crypto.getRandomValues(r);for(let i=a.length-1;i>0;i--){const k=r[i]%(i+1);[a[i],a[k]]=[a[k],a[i]]}return a}
+
+// Analyse une combinaison : groupe (même nombre, couleurs différentes) ou suite (même couleur, nombres consécutifs)
+function analyze(ids){
+  if(ids.length<3)return{ok:false};
+  const ts=ids.map(T),J=ts.filter(t=>t.j),N=ts.filter(t=>!t.j);
+  if(!N.length)return{ok:false};
+  let group=null;
+  if(ids.length<=4&&N.every(t=>t.n===N[0].n)&&new Set(N.map(t=>t.c)).size===N.length){
+    group={ok:true,value:N[0].n*ids.length,order:[...N].sort((a,b)=>a.c-b.c).concat(J).map(t=>t.id)};
+  }
+  const run=analyzeRun(ids,J,N);
+  if(group&&run)return group.value>=run.value?group:run;
+  return group||run||{ok:false};
+}
+function analyzeRun(ids,J,N){
+  if(ids.length<=13&&N.every(t=>t.c===N[0].c)){
+    const s=[...N].sort((a,b)=>a.n-b.n);
+    if(new Set(s.map(t=>t.n)).size===s.length){
+      const min=s[0].n,max=s[s.length-1].n,gaps=max-min+1-s.length;
+      if(gaps<=J.length){
+        const extra=J.length-gaps,hi=Math.min(13-max,extra),lo=extra-hi,start=min-lo;
+        if(start>=1){
+          const order=[],jq=[...J];let value=0;
+          for(let v=start;v<start+ids.length;v++){const t=s.find(x=>x.n===v);order.push(t?t.id:jq.shift().id);value+=v}
+          return{ok:true,value,order};
+        }
+      }
+    }
+  }
+  return null;
+}
+const rackPoints=r=>r.reduce((s,id)=>s+(T(id).j?30:T(id).n),0);
+
+// ---------- État ----------
+let S=null;          // état partagé de la partie
+let me=0, role=null, code=null, myName='';
+let chat=[];         // [{id,from,text,ts}]
+let work=null;       // copie de travail pendant mon tour {board,rack}
+let startRack=null;  // tuiles du chevalet au début du tour
+let sel=new Set();
+let sortMode='color';
+let peer=null, conn=null, connected=false, unread=0;
+
+const $=id=>document.getElementById(id);
+const store=()=>{try{localStorage.setItem('marinnikub-'+code,JSON.stringify({role,me,myName,S,chat}))}catch(e){}};
+const load=c=>{try{return JSON.parse(localStorage.getItem('marinnikub-'+c))}catch(e){return null}};
+
+function newGame(names){
+  const deck=shuffle([...Array(106).keys()]);
+  return{v:1,deck,racks:[deck.splice(0,14),deck.splice(0,14)],board:[],turn:Math.random()<.5?0:1,
+    melded:[false,false],names,passes:0,over:null,log:'Nouvelle manche !',game:(S?.game||0)+1,scores:S?.scores||[0,0]};
+}
+
+// ---------- Réseau (PeerJS, pair-à-pair) ----------
+const PEER_OPTS={debug:0,config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]}};
+function hostId(c){return 'marinnikub-v1-'+c}
+
+function startHost(){
+  peer=new Peer(hostId(code),PEER_OPTS);
+  peer.on('open',()=>setConn(false));
+  peer.on('connection',c=>{if(conn&&conn.open)conn.close();bindConn(c)});
+  peer.on('error',e=>{
+    if(e.type==='unavailable-id'){setTimeout(()=>{peer.destroy();startHost()},4000)}
+    else if(e.type==='network'||e.type==='server-error'||e.type==='socket-error'){setTimeout(()=>{peer.destroy();startHost()},4000)}
+  });
+  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
+}
+function startGuest(){
+  peer=new Peer(PEER_OPTS);
+  peer.on('open',()=>tryConnect());
+  peer.on('error',e=>{
+    if(e.type==='peer-unavailable'){setConn(false);setTimeout(tryConnect,3000)}
+    else if(e.type==='network'||e.type==='server-error'||e.type==='socket-error'){setTimeout(()=>{peer.destroy();startGuest()},4000)}
+  });
+  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
+}
+function tryConnect(){
+  if(connected||!peer||peer.destroyed)return;
+  if(peer.disconnected){try{peer.reconnect()}catch(e){};setTimeout(tryConnect,3000);return}
+  bindConn(peer.connect(hostId(code),{reliable:true}));
+}
+function bindConn(c){
+  conn=c;
+  c.on('open',()=>{lastSeen=Date.now();setConn(true);send({t:'hello',name:myName,state:S,chat})});
+  c.on('data',onData);
+  c.on('close',()=>{if(conn===c){setConn(false);if(role==='guest')setTimeout(tryConnect,2500)}});
+  c.on('error',()=>{});
+}
+function send(o){if(conn&&conn.open)try{conn.send(o)}catch(e){}}
+let lastSeen=0;
+setInterval(()=>{
+  if(!conn||!conn.open)return;
+  send({t:'ping'});
+  if(connected&&Date.now()-lastSeen>15000){const c=conn;conn=null;setConn(false);try{c.close()}catch(e){};if(role==='guest')tryConnect()}
+},5000);
+function setConn(on){
+  connected=on;
+  $('conn').classList.toggle('on',on);
+  $('conn').querySelector('span').textContent=on?'Connecté':(role==='host'?'En attente de ton amie':'Reconnexion…');
+  if(on&&role==='host'&&!$('lobby').classList.contains('hidden'))showGame();
+}
+function onData(d){
+  if(!d||typeof d!=='object')return;
+  lastSeen=Date.now();
+  if(!connected)setConn(true);
+  if(d.t==='ping')return;
+  if(d.t==='hello'){
+    mergeChat(d.chat);
+    if(d.state&&(!S||d.state.game>S.game||(d.state.game===S.game&&d.state.v>S.v)))adopt(d.state);
+    if(role==='host'&&S&&typeof d.name==='string'&&S.names[1]!==d.name){S.names[1]=d.name.slice(0,20);S.v++;store();}
+    if(role==='host')send({t:'state',state:S});
+    render();
+  }else if(d.t==='state'&&d.state){
+    if(!S||d.state.game>S.game||(d.state.game===S.game&&d.state.v>S.v)){adopt(d.state);render()}
+  }else if(d.t==='chat'&&d.m){mergeChat([d.m])}
+}
+function adopt(st){
+  const turnChanged=!S||S.turn!==st.turn||S.game!==st.game;
+  S=st;store();
+  if(turnChanged||!work)beginTurn();
+  if(S.turn===me&&!S.over&&document.hidden)document.title='🔔 À toi de jouer ! — Marinnikub';
+}
+function broadcast(){S.v++;store();send({t:'state',state:S});beginTurn();render()}
+
+// ---------- Tour ----------
+function beginTurn(){
+  sel.clear();
+  work={board:S.board.map(s=>[...s]),rack:[...S.racks[me]]};
+  startRack=new Set(S.racks[me]);
+  setMsg('');
+}
+const myTurn=()=>S&&S.turn===me&&!S.over;
+const changed=()=>work.rack.length!==S.racks[me].length||JSON.stringify(work.board)!==JSON.stringify(S.board);
+
+function removeSel(){
+  const ids=[...sel];
+  work.rack=work.rack.filter(id=>!sel.has(id));
+  work.board=work.board.map(s=>s.filter(id=>!sel.has(id)));
+  return ids;
+}
+function moveTo(setIdx){
+  if(!sel.size)return setMsg('Sélectionne d\'abord des tuiles.');
+  const target=work.board[setIdx];
+  const ids=removeSel();
+  target.push(...ids);
+  work.board=work.board.filter(s=>s.length);
+  tidy(target);sel.clear();render();
+}
+function newSet(){
+  if(!sel.size)return setMsg('Sélectionne des tuiles pour créer une combinaison.');
+  const ids=removeSel();
+  work.board=work.board.filter(s=>s.length);
+  const s=ids;work.board.push(s);tidy(s);sel.clear();render();
+}
+function backToRack(){
+  const ok=[...sel].filter(id=>startRack.has(id)&&!work.rack.includes(id));
+  if(!ok.length)return setMsg('Seules les tuiles de ton chevalet peuvent y revenir.',true);
+  work.board=work.board.map(s=>s.filter(id=>!ok.includes(id))).filter(s=>s.length);
+  work.rack.push(...ok);sel.clear();render();
+}
+function tidy(s){const a=analyze(s);if(a.ok){s.splice(0,s.length,...a.order)}}
+
+function validate(){
+  if(!myTurn())return;
+  const played=[...startRack].filter(id=>!work.rack.includes(id));
+  if(!played.length)return setMsg('Pose au moins une tuile, ou pioche.',true);
+  const bad=work.board.findIndex(s=>!analyze(s).ok);
+  if(bad>=0)return setMsg('Une combinaison n\'est pas valide (en rouge).',true);
+  if(!S.melded[me]){
+    const key=s=>[...s].sort((a,b)=>a-b).join(',');
+    const newKeys=new Set(work.board.map(key));
+    if(!S.board.every(s=>newKeys.has(key(s))))return setMsg('Avant ta première pose, tu ne peux pas modifier les combinaisons existantes.',true);
+    const oldKeys=new Set(S.board.map(key));
+    const fresh=work.board.filter(s=>!oldKeys.has(key(s)));
+    const total=fresh.reduce((t,s)=>t+analyze(s).value,0);
+    if(total<30)return setMsg(`Première pose : ${total} points, il en faut au moins 30.`,true);
+  }
+  S.board=work.board.map(s=>analyze(s).order);
+  S.racks[me]=[...work.rack];
+  S.melded[me]=true;S.passes=0;
+  S.log=`${S.names[me]} a posé ${played.length} tuile${played.length>1?'s':''}.`;
+  if(!S.racks[me].length)endRound(me,'a posé toutes ses tuiles');
+  else S.turn=1-me;
+  broadcast();
+}
+// Décompte officiel : le perdant retire de son score la valeur de son chevalet (joker = 30),
+// le gagnant marque ce total (ou la différence quand la manche se termine pioche vide).
+function endRound(w,reason){
+  const p=[rackPoints(S.racks[0]),rackPoints(S.racks[1])];
+  S.scores=[...(S.scores||[0,0])];
+  if(w>=0){const l=1-w;S.scores[l]-=p[l];S.scores[w]+=p[l]-p[w]}
+  S.over={winner:w,reason:w===-1?'égalité':reason,pts:p};
+}
+function draw(){
+  if(!myTurn())return;
+  S.racks[me]=[...S.racks[me]];
+  if(S.deck.length){
+    S.racks[me].push(S.deck.pop());S.passes=0;
+    S.log=`${S.names[me]} a pioché.`;
+  }else{
+    S.passes++;S.log=`${S.names[me]} passe (pioche vide).`;
+    if(S.passes>=2){
+      const p=[rackPoints(S.racks[0]),rackPoints(S.racks[1])];
+      endRound(p[0]===p[1]?-1:(p[0]<p[1]?0:1),'a le moins de points en main (pioche vide)');
+    }
+  }
+  if(!S.over)S.turn=1-me;
+  broadcast();
+}
+function reset(){beginTurn();render()}
+
+// ---------- Affichage ----------
+function tileEl(id,clickable){
+  const t=T(id),el=document.createElement('div');
+  el.className='tile '+(t.j?'j':'c'+t.c);
+  el.textContent=t.j?'☺':t.n;
+  el.title=t.j?'Joker':`${t.n} ${COLORS[t.c]}`;
+  if(sel.has(id))el.classList.add('sel');
+  if(myTurn()&&startRack.has(id)&&!work.rack.includes(id))el.classList.add('fresh');
+  if(clickable){el.classList.add('click');el.onclick=e=>{e.stopPropagation();sel.has(id)?sel.delete(id):sel.add(id);setMsg('');render()}}
+  return el;
+}
+function setMsg(t,err){$('msg').textContent=t;$('msg').classList.toggle('err',!!err)}
+
+function render(){
+  if(!S)return;
+  const mine=myTurn(),opp=1-me;
+  const board=mine?work.board:S.board;
+  const B=$('board');B.innerHTML='';
+  if(!board.length&&!mine){const p=document.createElement('div');p.className='empty-board';p.textContent='Le plateau est vide.';B.appendChild(p)}
+  board.forEach((s,i)=>{
+    const d=document.createElement('div');d.className='set';
+    if(mine)d.classList.add(analyze(s).ok?'valid':'invalid');
+    s.forEach(id=>d.appendChild(tileEl(id,mine)));
+    if(mine){const sl=document.createElement('div');sl.className='slot';sl.textContent='+';sl.title='Ajouter la sélection ici';sl.onclick=()=>moveTo(i);d.appendChild(sl)}
+    B.appendChild(d);
+  });
+  if(mine){const n=document.createElement('div');n.id='newSet';n.textContent='+ Nouvelle combinaison';n.onclick=newSet;B.appendChild(n)}
+
+  const rack=[...(mine?work.rack:S.racks[me])];
+  rack.sort(sortMode==='color'
+    ?(a,b)=>(T(a).j-T(b).j)||(T(a).c-T(b).c)||(T(a).n-T(b).n)
+    :(a,b)=>(T(a).j-T(b).j)||(T(a).n-T(b).n)||(T(a).c-T(b).c));
+  const R=$('rack');R.innerHTML='';
+  rack.forEach(id=>R.appendChild(tileEl(id,mine)));
+  const canBack=mine&&[...sel].some(id=>startRack.has(id)&&!work.rack.includes(id));
+  R.classList.toggle('target',canBack);R.onclick=canBack?backToRack:null;
+
+  $('rackInfo').textContent=`Ton chevalet (${rack.length})${S.melded[me]?'':' · 1ʳᵉ pose : 30 pts min.'}`;
+  $('validateBtn').disabled=!mine;
+  $('drawBtn').disabled=!mine||(mine&&changed());
+  $('drawBtn').textContent=S.deck.length?`Piocher (${S.deck.length})`:'Passer';
+  $('resetBtn').disabled=!mine||!changed();
+  $('backBtn').disabled=!canBack;
+
+  const oppName=S.names[opp]||'ton amie';
+  let st;
+  if(S.over)st='Partie terminée';
+  else if(mine)st=`<b>À toi de jouer !</b> ${esc(oppName)} a ${S.racks[opp].length} tuiles.`;
+  else st=`Tour de ${esc(oppName)} (${S.racks[opp].length} tuiles)…`;
+  $('status').innerHTML=st+`<br><small style="color:var(--muted)">${esc(S.log||'')}</small>`;
+  if(!document.hidden)document.title='Marinnikub';
+  const sc=S.scores||[0,0];
+  $('score').textContent=`Manche ${S.game||1} · ${S.names[0]} ${sc[0]} / ${S.names[1]||'?'} ${sc[1]}`;
+
+  if(S.over){
+    const w=S.over.winner;
+    $('ovTitle').textContent=w===-1?'Égalité !':(w===me?'Tu as gagné ! 🎉':`${S.names[w]} a gagné`);
+    const pts=S.over.pts||[0,0],sc=S.scores||[0,0];
+    $('ovText').innerHTML=esc(w===-1?'Même nombre de points en main.':`${w===me?'Tu':S.names[w]} ${S.over.reason}.`)
+      +`<br><br>Points restants en main : ${esc(S.names[0])} ${pts[0]} · ${esc(S.names[1])} ${pts[1]}`
+      +`<br><b>Score total : ${esc(S.names[0])} ${sc[0]} · ${esc(S.names[1])} ${sc[1]}</b>`;
+    $('overlay').classList.remove('hidden');
+  }else $('overlay').classList.add('hidden');
+}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+// ---------- Chat ----------
+function mergeChat(list){
+  if(!Array.isArray(list))return;
+  const have=new Set(chat.map(m=>m.id));let added=0;
+  for(const m of list){if(m&&typeof m.id==='string'&&typeof m.text==='string'&&!have.has(m.id)){chat.push({id:m.id,from:+m.from===1?1:0,text:m.text.slice(0,500),ts:+m.ts||Date.now()});added++;if(m.from!==me)unread++}}
+  if(added){chat.sort((a,b)=>a.ts-b.ts);store();renderChat()}
+}
+function renderChat(){
+  const box=$('msgs');box.innerHTML='';
+  if(!chat.length){const d=document.createElement('div');d.className='m sys';d.textContent='Aucun message pour l\'instant. Dis bonjour 👋';box.appendChild(d)}
+  for(const m of chat){
+    const d=document.createElement('div');d.className='m'+(m.from===me?' me':'');
+    const sm=document.createElement('small');
+    sm.textContent=(S?.names[m.from]||(m.from===me?'Toi':'Amie'))+' · '+new Date(m.ts).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    d.appendChild(sm);d.appendChild(document.createTextNode(m.text));box.appendChild(d);
+  }
+  box.scrollTop=box.scrollHeight;
+  const open=!$('chat').classList.contains('closed')||matchMedia('(min-width:821px)').matches;
+  if(open)unread=0;
+  $('badge').textContent=unread;$('badge').classList.toggle('hidden',!unread);
+}
+$('chatForm').onsubmit=e=>{
+  e.preventDefault();const text=$('chatIn').value.trim();if(!text)return;
+  const m={id:Math.random().toString(36).slice(2)+Date.now(),from:me,text,ts:Date.now()};
+  chat.push(m);store();send({t:'chat',m});$('chatIn').value='';renderChat();
+};
+$('chatToggle').onclick=()=>{$('chat').classList.remove('closed');unread=0;renderChat();$('chatIn').focus()};
+$('chatClose').onclick=()=>$('chat').classList.add('closed');
+
+// ---------- Boutons ----------
+$('validateBtn').onclick=validate;
+$('drawBtn').onclick=draw;
+$('resetBtn').onclick=reset;
+$('backBtn').onclick=backToRack;
+function setSort(m){sortMode=m;$('sortRun').classList.toggle('on',m==='color');$('sortGrp').classList.toggle('on',m==='num');render()}
+$('sortRun').onclick=()=>setSort('color');
+$('sortGrp').onclick=()=>setSort('num');
+setSort('color');
+$('ovBtn').onclick=()=>{S=newGame(S.names);broadcastNew()};
+$('rulesBtn').onclick=()=>$('rules').classList.remove('hidden');
+$('rulesClose').onclick=()=>$('rules').classList.add('hidden');
+function broadcastNew(){store();send({t:'state',state:S});beginTurn();render()}
+// Sur mobile, la connexion se coupe quand on change d'appli : on la relance au retour.
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)return;
+  document.title='Marinnikub';
+  if(!peer||connected)return;
+  if(peer.destroyed){role==='host'?startHost():startGuest();return}
+  if(peer.disconnected){try{peer.reconnect()}catch(e){}}
+  if(role==='guest')setTimeout(tryConnect,800);
+});
+
+// ---------- Démarrage ----------
+function showGame(){$('lobby').classList.add('hidden');$('game').classList.remove('hidden');render();renderChat()}
+function shareUrl(){return location.origin+location.pathname+'#'+code}
+
+function init(){
+  if(typeof Peer==='undefined'){$('lobbyErr').textContent='Impossible de charger le module réseau. Vérifie ta connexion internet.';return}
+  const h=location.hash.slice(1).replace(/[^a-z0-9]/gi,'');
+  const saved=h?load(h):null;
+  if(h&&saved){
+    code=h;role=saved.role;me=saved.me;myName=saved.myName;S=saved.S;chat=saved.chat||[];
+    if(S)beginTurn();
+    if(role==='host'){startHost();if(S&&S.names[1])showGame();else waitScreen()}
+    else{startGuest();showGame()}
+    return;
+  }
+  if(h){$('goBtn').textContent='Rejoindre la partie';$('lobby').querySelector('.sub').textContent='Tu es invitée à une partie !'}
+  $('nameIn').focus();
+  $('nameIn').onkeydown=e=>{if(e.key==='Enter')$('goBtn').click()};
+  $('goBtn').onclick=()=>{
+    myName=$('nameIn').value.trim().slice(0,20);
+    if(!myName){$('nameIn').focus();return}
+    if(h){code=h;role='guest';me=1;store();startGuest();showGame();setConn(false)}
+    else{
+      const a=new Uint8Array(6);crypto.getRandomValues(a);
+      code=[...a].map(x=>'abcdefghjkmnpqrstuvwxyz23456789'[x%31]).join('');
+      role='host';me=0;S=newGame([myName,'']);beginTurn();
+      history.replaceState(null,'','#'+code);store();startHost();waitScreen();
+    }
+  };
+}
+function waitScreen(){
+  $('lobbyForm').classList.add('hidden');$('lobbyWait').classList.remove('hidden');
+  $('shareLink').value=shareUrl();
+  $('copyBtn').onclick=()=>{navigator.clipboard?.writeText(shareUrl());$('copyBtn').textContent='Copié !'};
+  if(navigator.share){$('shareBtn').classList.remove('hidden');$('shareBtn').onclick=()=>navigator.share({title:'Marinnikub',text:'Viens jouer à Marinnikub avec moi !',url:shareUrl()}).catch(()=>{})}
+}
+init();
+</script>
+</body>
+</html>
