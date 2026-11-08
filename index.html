@@ -293,8 +293,8 @@ const TOKEN=(()=>{const k='marinnikub-token';try{let t=localStorage.getItem(k);i
 function startPeer(){
   lastStart=Date.now();
   const p=new Peer(seatId(me),{...PEER_OPTS,token:TOKEN});peer=p;
-  p.on('open',()=>{if(claiming){claiming=false;store()}if(role==='guest')tryConnect(true)});
-  p.on('connection',c=>{if(role==='host')bindConn(c)});
+  p.on('open',()=>{if(claiming){claiming=false;store()}tryConnect(true)});
+  p.on('connection',c=>bindConn(c,false));
   p.on('error',e=>{
     console.log('[Marinnikub] réseau :',e.type);
     if(e.type==='unavailable-id'&&claiming)return seatTaken();
@@ -305,19 +305,25 @@ function startPeer(){
   p.on('disconnected',()=>{if(!p.destroyed)try{p.reconnect()}catch(_){}});
 }
 const startHost=startPeer,startGuest=startPeer;
+// Les deux joueurs appellent l'autre : celui qui revient dans l'appli se reconnecte tout de suite.
 function tryConnect(force){
   if(connected||!peer||!peer.open)return;
   if(!force&&Date.now()-lastAttempt<4000)return;
   lastAttempt=Date.now();
-  bindConn(peer.connect(seatId(0),{reliable:true}));
+  bindConn(peer.connect(seatId(1-me),{reliable:true}),true);
 }
-function bindConn(c){
+// Si deux liaisons s'ouvrent en même temps, les deux côtés gardent celle lancée par Joueur 2.
+function bindConn(c,outgoing){
+  c._pref=(role==='guest')===outgoing;
   c.on('open',()=>{
-    if(conn&&conn!==c&&conn.open)try{conn.close()}catch(_){}
+    if(conn&&conn!==c&&conn.open){
+      if(conn._pref&&!c._pref){try{c.close()}catch(_){}return}
+      try{conn.close()}catch(_){}
+    }
     conn=c;lastSeen=Date.now();setConn(true);send({t:'hello',name:myName,state:S,chat});
   });
-  c.on('data',d=>{if(conn!==c&&c.open){conn=c}onData(d)});
-  c.on('close',()=>{if(conn===c){conn=null;setConn(false)}});
+  c.on('data',d=>{if(conn!==c&&(!conn||!conn.open))conn=c;onData(d)});
+  c.on('close',()=>{if(conn===c){conn=null;setConn(false);lastAttempt=0}});
   c.on('error',()=>{});
 }
 function send(o){if(conn&&conn.open)try{conn.send(o)}catch(e){}}
@@ -332,7 +338,7 @@ function watchdog(){
   if(connected)setConn(false);
   if(!peer||peer.destroyed){if(Date.now()-lastStart>4000)startPeer();return}
   if(peer.disconnected){try{peer.reconnect()}catch(_){}return}
-  if(role==='guest')tryConnect();
+  tryConnect();
 }
 setInterval(watchdog,4000);
 function setConn(on){
@@ -344,7 +350,8 @@ function onData(d){
   if(!d||typeof d!=='object')return;
   lastSeen=Date.now();
   if(!connected)setConn(true);
-  if(d.t==='ping')return;
+  if(d.t==='ping'){send({t:'pong'});return}
+  if(d.t==='pong')return;
   if(d.t==='hello'){
     mergeChat(d.chat);
     if(d.state&&newer(d.state,S))adopt(d.state);
@@ -570,10 +577,15 @@ $('resetAll').onclick=()=>{
 };
 function broadcastNew(){store();send({t:'state',state:S});beginTurn();render()}
 // Sur mobile, la connexion se coupe quand on change d'appli : on la relance au retour.
+// Retour dans l'appli : la liaison est souvent morte sans le dire. On la teste en 3 s.
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)return;
   document.title='Marinnikub';
-  lastAttempt=0;watchdog();
+  lastAttempt=0;
+  if(conn&&conn.open){
+    const t=Date.now();send({t:'ping'});
+    setTimeout(()=>{if(lastSeen<t&&conn){const c=conn;conn=null;setConn(false);try{c.close()}catch(_){};watchdog()}},3000);
+  }else watchdog();
 });
 
 // ---------- Démarrage ----------
