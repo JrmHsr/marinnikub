@@ -142,13 +142,8 @@ header .logo{font-size:24px;margin:0}
     <div id="lobbyForm">
       <label for="nameIn">Ton prénom</label>
       <input id="nameIn" maxlength="20" placeholder="Ex : Marine" autocomplete="off">
-      <button class="primary" id="goBtn">Créer une partie</button>
-    </div>
-    <div id="lobbyWait" class="hidden">
-      <label>Envoie ce lien à ton amie :</label>
-      <div class="linkbox"><input id="shareLink" readonly><button id="copyBtn">Copier</button></div>
-      <button id="shareBtn" class="ghost hidden">Partager…</button>
-      <p class="wait"><span class="dot"></span> En attente de ton adversaire…</p>
+      <label>Choisis ta place (une seule fois, elle est gardée ensuite)</label>
+      <div style="display:flex;gap:8px"><button class="primary" id="seat0">Joueur 1</button><button class="primary" id="seat1">Joueur 2</button></div>
     </div>
     <p id="lobbyErr" class="wait" style="color:var(--bad)"></p>
   </div>
@@ -202,6 +197,7 @@ header .logo{font-size:24px;margin:0}
     <p><b>Fin de manche :</b> le premier qui pose toutes ses tuiles gagne. L'autre perd la valeur de son chevalet (joker = 30 points), que le gagnant marque. Si la pioche est vide et que personne ne peut jouer, celui qui a le moins de points en main gagne la manche.</p>
     <p style="color:var(--muted);font-size:14px"><b>Comment jouer ici :</b> touche des tuiles pour les sélectionner, puis touche « + » au bout d'une combinaison pour les y ajouter, ou « + Nouvelle combinaison ». « ↩ Reprendre » renvoie dans ton chevalet les tuiles posées ce tour-ci. « Annuler » remet tout comme au début du tour.</p>
     <button class="primary" id="rulesClose">J'ai compris</button>
+    <button class="ghost" id="resetAll" style="width:100%;margin-top:10px">Nouvelle partie (scores à zéro)</button>
   </div>
 </div>
 
@@ -258,8 +254,9 @@ let sortMode='color';
 let peer=null, conn=null, connected=false, unread=0;
 
 const $=id=>document.getElementById(id);
-const store=()=>{try{localStorage.setItem('marinnikub-'+code,JSON.stringify({role,me,myName,S,chat}))}catch(e){}};
-const load=c=>{try{return JSON.parse(localStorage.getItem('marinnikub-'+c))}catch(e){return null}};
+const KEY='marinnikub-salon';
+const store=()=>{try{localStorage.setItem(KEY,JSON.stringify({role,me,myName,S,chat}))}catch(e){}};
+const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))}catch(e){return null}};
 
 function newGame(names){
   const deck=shuffle([...Array(106).keys()]);
@@ -269,23 +266,33 @@ function newGame(names){
 
 // ---------- Réseau (PeerJS, pair-à-pair) ----------
 const PEER_OPTS={debug:0,config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]}};
-function hostId(c){return 'marinnikub-v1-'+c}
+// Salon unique et fixe : Joueur 1 et Joueur 2 ont chacun leur identifiant réseau.
+const SALT='marinnikub-k7q2x9';
+const seatId=n=>SALT+'-p'+n;
+let claiming=false; // première prise de place : si elle est occupée, on prévient
+function seatTaken(){
+  claiming=false;try{peer.destroy()}catch(e){};peer=null;role=null;S=null;
+  try{localStorage.removeItem(KEY)}catch(e){}
+  $('game').classList.add('hidden');$('lobby').classList.remove('hidden');
+  $('lobbyErr').textContent="Cette place est déjà prise : choisis l'autre.";
+}
 
 function startHost(){
-  peer=new Peer(hostId(code),PEER_OPTS);
-  peer.on('open',()=>setConn(false));
+  peer=new Peer(seatId(0),PEER_OPTS);
+  peer.on('open',()=>{if(claiming){claiming=false;store()}setConn(false)});
   peer.on('connection',c=>{if(conn&&conn.open)conn.close();bindConn(c)});
   peer.on('error',e=>{
-    if(e.type==='unavailable-id'){setTimeout(()=>{peer.destroy();startHost()},4000)}
+    if(e.type==='unavailable-id'){if(claiming)return seatTaken();setTimeout(()=>{peer.destroy();startHost()},4000)}
     else if(e.type==='network'||e.type==='server-error'||e.type==='socket-error'){setTimeout(()=>{peer.destroy();startHost()},4000)}
   });
   peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
 }
 function startGuest(){
-  peer=new Peer(PEER_OPTS);
-  peer.on('open',()=>tryConnect());
+  peer=new Peer(seatId(1),PEER_OPTS);
+  peer.on('open',()=>{if(claiming){claiming=false;store()}tryConnect()});
   peer.on('error',e=>{
-    if(e.type==='peer-unavailable'){setConn(false);setTimeout(tryConnect,3000)}
+    if(e.type==='unavailable-id'){if(claiming)return seatTaken();setTimeout(()=>{peer.destroy();startGuest()},4000)}
+    else if(e.type==='peer-unavailable'){setConn(false);setTimeout(tryConnect,3000)}
     else if(e.type==='network'||e.type==='server-error'||e.type==='socket-error'){setTimeout(()=>{peer.destroy();startGuest()},4000)}
   });
   peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
@@ -293,7 +300,7 @@ function startGuest(){
 function tryConnect(){
   if(connected||!peer||peer.destroyed)return;
   if(peer.disconnected){try{peer.reconnect()}catch(e){};setTimeout(tryConnect,3000);return}
-  bindConn(peer.connect(hostId(code),{reliable:true}));
+  bindConn(peer.connect(seatId(0),{reliable:true}));
 }
 function bindConn(c){
   conn=c;
@@ -313,7 +320,6 @@ function setConn(on){
   connected=on;
   $('conn').classList.toggle('on',on);
   $('conn').querySelector('span').textContent=on?'Connecté':(role==='host'?'En attente de ton amie':'Reconnexion…');
-  if(on&&role==='host'&&!$('lobby').classList.contains('hidden'))showGame();
 }
 function onData(d){
   if(!d||typeof d!=='object')return;
@@ -439,7 +445,7 @@ function tileEl(id,clickable){
 function setMsg(t,err){$('msg').textContent=t;$('msg').classList.toggle('err',!!err)}
 
 function render(){
-  if(!S)return;
+  if(!S){$('status').innerHTML='En attente de Joueur 1…<br><small style="color:var(--muted)">La partie démarre dès que vous êtes connectées.</small>';return}
   const mine=myTurn(),opp=1-me;
   const board=mine?work.board:S.board;
   const B=$('board');B.innerHTML='';
@@ -532,6 +538,13 @@ setSort('color');
 $('ovBtn').onclick=()=>{S=newGame(S.names);broadcastNew()};
 $('rulesBtn').onclick=()=>$('rules').classList.remove('hidden');
 $('rulesClose').onclick=()=>$('rules').classList.add('hidden');
+$('resetAll').onclick=()=>{
+  if(!S)return;
+  const b=$('resetAll');
+  if(b.dataset.c!=='1'){b.dataset.c='1';b.textContent='Touche encore pour confirmer';return}
+  b.dataset.c='';b.textContent='Nouvelle partie (scores à zéro)';
+  const g=S.game;S=newGame(S.names);S.scores=[0,0];S.game=g+1;broadcastNew();$('rules').classList.add('hidden');
+};
 function broadcastNew(){store();send({t:'state',state:S});beginTurn();render()}
 // Sur mobile, la connexion se coupe quand on change d'appli : on la relance au retour.
 document.addEventListener('visibilitychange',()=>{
@@ -545,39 +558,27 @@ document.addEventListener('visibilitychange',()=>{
 
 // ---------- Démarrage ----------
 function showGame(){$('lobby').classList.add('hidden');$('game').classList.remove('hidden');render();renderChat()}
-function shareUrl(){return location.origin+location.pathname+'#'+code}
-
 function init(){
   if(typeof Peer==='undefined'){$('lobbyErr').textContent='Impossible de charger le module réseau. Vérifie ta connexion internet.';return}
-  const h=location.hash.slice(1).replace(/[^a-z0-9]/gi,'');
-  const saved=h?load(h):null;
-  if(h&&saved){
-    code=h;role=saved.role;me=saved.me;myName=saved.myName;S=saved.S;chat=saved.chat||[];
+  if(location.hash)history.replaceState(null,'',location.pathname);
+  const saved=load();
+  if(saved&&saved.role){
+    role=saved.role;me=saved.me;myName=saved.myName;S=saved.S;chat=saved.chat||[];
     if(S)beginTurn();
-    if(role==='host'){startHost();if(S&&S.names[1])showGame();else waitScreen()}
-    else{startGuest();showGame()}
+    role==='host'?startHost():startGuest();showGame();setConn(false);
     return;
   }
-  if(h){$('goBtn').textContent='Rejoindre la partie';$('lobby').querySelector('.sub').textContent='Tu es invitée à une partie !'}
   $('nameIn').focus();
-  $('nameIn').onkeydown=e=>{if(e.key==='Enter')$('goBtn').click()};
-  $('goBtn').onclick=()=>{
+  const pick=n=>{
     myName=$('nameIn').value.trim().slice(0,20);
-    if(!myName){$('nameIn').focus();return}
-    if(h){code=h;role='guest';me=1;store();startGuest();showGame();setConn(false)}
-    else{
-      const a=new Uint8Array(6);crypto.getRandomValues(a);
-      code=[...a].map(x=>'abcdefghjkmnpqrstuvwxyz23456789'[x%31]).join('');
-      role='host';me=0;S=newGame([myName,'']);beginTurn();
-      history.replaceState(null,'','#'+code);store();startHost();waitScreen();
-    }
+    if(!myName){$('nameIn').focus();$('lobbyErr').textContent="Écris ton prénom d'abord.";return}
+    $('lobbyErr').textContent='';claiming=true;me=n;chat=[];
+    if(n===0){role='host';S=newGame([myName,'']);beginTurn();startHost()}
+    else{role='guest';S=null;startGuest()}
+    showGame();setConn(false);
   };
-}
-function waitScreen(){
-  $('lobbyForm').classList.add('hidden');$('lobbyWait').classList.remove('hidden');
-  $('shareLink').value=shareUrl();
-  $('copyBtn').onclick=()=>{navigator.clipboard?.writeText(shareUrl());$('copyBtn').textContent='Copié !'};
-  if(navigator.share){$('shareBtn').classList.remove('hidden');$('shareBtn').onclick=()=>navigator.share({url:shareUrl()}).catch(()=>{})}
+  $('seat0').onclick=()=>pick(0);
+  $('seat1').onclick=()=>pick(1);
 }
 init();
 </script>
