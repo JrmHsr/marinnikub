@@ -285,49 +285,60 @@ function seatTaken(){
   $('lobbyErr').textContent="Cette place est déjà prise : choisis l'autre.";
 }
 
-function startHost(){
-  peer=new Peer(seatId(0),PEER_OPTS);
-  peer.on('open',()=>{if(claiming){claiming=false;store()}setConn(false)});
-  peer.on('connection',c=>{if(conn&&conn.open)conn.close();bindConn(c)});
-  peer.on('error',e=>{
-    if(e.type==='unavailable-id'){if(claiming)return seatTaken();setTimeout(()=>{peer.destroy();startHost()},4000)}
-    else if(e.type==='network'||e.type==='server-error'||e.type==='socket-error'){setTimeout(()=>{peer.destroy();startHost()},4000)}
+// Un seul pair réseau par appareil ; un « surveillant » relance tout ce qui tombe.
+let lastStart=0,lastAttempt=0,lastSeen=0;
+// Clé permanente de cet appareil : après une coupure brutale, le serveur de mise en relation
+// rend immédiatement sa place au même appareil (sinon il la bloque ~1 minute).
+const TOKEN=(()=>{const k='marinnikub-token';try{let t=localStorage.getItem(k);if(!t){t=Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,t)}return t}catch(e){return Math.random().toString(36).slice(2)}})();
+function startPeer(){
+  lastStart=Date.now();
+  const p=new Peer(seatId(me),{...PEER_OPTS,token:TOKEN});peer=p;
+  p.on('open',()=>{if(claiming){claiming=false;store()}if(role==='guest')tryConnect(true)});
+  p.on('connection',c=>{if(role==='host')bindConn(c)});
+  p.on('error',e=>{
+    console.log('[Marinnikub] réseau :',e.type);
+    if(e.type==='unavailable-id'&&claiming)return seatTaken();
+    if(e.type==='peer-unavailable'){setConn(false);return}
+    // erreurs graves : on détruit, le surveillant recrée le pair
+    if(['unavailable-id','network','server-error','socket-error','socket-closed','ssl-unavailable','disconnected'].includes(e.type)){try{p.destroy()}catch(_){}}
   });
-  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
+  p.on('disconnected',()=>{if(!p.destroyed)try{p.reconnect()}catch(_){}});
 }
-function startGuest(){
-  peer=new Peer(seatId(1),PEER_OPTS);
-  peer.on('open',()=>{if(claiming){claiming=false;store()}tryConnect()});
-  peer.on('error',e=>{
-    if(e.type==='unavailable-id'){if(claiming)return seatTaken();setTimeout(()=>{peer.destroy();startGuest()},4000)}
-    else if(e.type==='peer-unavailable'){setConn(false);setTimeout(tryConnect,3000)}
-    else if(e.type==='network'||e.type==='server-error'||e.type==='socket-error'){setTimeout(()=>{peer.destroy();startGuest()},4000)}
-  });
-  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
-}
-function tryConnect(){
-  if(connected||!peer||peer.destroyed)return;
-  if(peer.disconnected){try{peer.reconnect()}catch(e){};setTimeout(tryConnect,3000);return}
+const startHost=startPeer,startGuest=startPeer;
+function tryConnect(force){
+  if(connected||!peer||!peer.open)return;
+  if(!force&&Date.now()-lastAttempt<4000)return;
+  lastAttempt=Date.now();
   bindConn(peer.connect(seatId(0),{reliable:true}));
 }
 function bindConn(c){
-  conn=c;
-  c.on('open',()=>{lastSeen=Date.now();setConn(true);send({t:'hello',name:myName,state:S,chat})});
-  c.on('data',onData);
-  c.on('close',()=>{if(conn===c){setConn(false);if(role==='guest')setTimeout(tryConnect,2500)}});
+  c.on('open',()=>{
+    if(conn&&conn!==c&&conn.open)try{conn.close()}catch(_){}
+    conn=c;lastSeen=Date.now();setConn(true);send({t:'hello',name:myName,state:S,chat});
+  });
+  c.on('data',d=>{if(conn!==c&&c.open){conn=c}onData(d)});
+  c.on('close',()=>{if(conn===c){conn=null;setConn(false)}});
   c.on('error',()=>{});
 }
 function send(o){if(conn&&conn.open)try{conn.send(o)}catch(e){}}
-let lastSeen=0;
-setInterval(()=>{
-  if(!conn||!conn.open)return;
-  send({t:'ping'});
-  if(connected&&Date.now()-lastSeen>15000){const c=conn;conn=null;setConn(false);try{c.close()}catch(e){};if(role==='guest')tryConnect()}
-},5000);
+function watchdog(){
+  if(!role)return;
+  if(conn&&conn.open){
+    send({t:'ping'});
+    // 75 s : un onglet en arrière-plan n'envoie plus qu'un signal par minute
+    if(Date.now()-lastSeen>75000){const c=conn;conn=null;setConn(false);try{c.close()}catch(_){}}
+    else return;
+  }
+  if(connected)setConn(false);
+  if(!peer||peer.destroyed){if(Date.now()-lastStart>4000)startPeer();return}
+  if(peer.disconnected){try{peer.reconnect()}catch(_){}return}
+  if(role==='guest')tryConnect();
+}
+setInterval(watchdog,4000);
 function setConn(on){
   connected=on;
   $('conn').classList.toggle('on',on);
-  $('conn').querySelector('span').textContent=on?'Connecté':(role==='host'?'En attente de ton amie':'Reconnexion…');
+  $('conn').querySelector('span').textContent=on?'Connecté':(role==='host'?'En attente de ton adversaire':'Reconnexion…');
 }
 function onData(d){
   if(!d||typeof d!=='object')return;
@@ -446,6 +457,7 @@ function reset(){beginTurn();render()}
 function tileEl(id,clickable){
   const t=T(id),el=document.createElement('div');
   el.className='tile '+(t.j?'j':'c'+t.c);
+  el.dataset.id=id;
   el.textContent=t.j?'☺':t.n;
   el.title=t.j?'Joker':`${t.n} ${COLORS[t.c]}`;
   if(sel.has(id))el.classList.add('sel');
@@ -456,7 +468,7 @@ function tileEl(id,clickable){
 function setMsg(t,err){$('msg').textContent=t;$('msg').classList.toggle('err',!!err)}
 
 function render(){
-  if(!S){$('status').innerHTML='En attente de Joueur 1…<br><small style="color:var(--muted)">La partie démarre dès que vous êtes connectées.</small>';return}
+  if(!S){$('status').innerHTML='En attente de Joueur 1…<br><small style="color:var(--muted)">La partie démarre dès que ton adversaire est connecté.</small>';return}
   const mine=myTurn(),opp=1-me;
   const board=mine?work.board:S.board;
   const B=$('board');B.innerHTML='';
@@ -486,7 +498,7 @@ function render(){
   $('resetBtn').disabled=!mine||!changed();
   $('backBtn').disabled=!canBack;
 
-  const oppName=S.names[opp]||'ton amie';
+  const oppName=S.names[opp]||'ton adversaire';
   let st;
   if(S.over)st='Partie terminée';
   else if(mine)st=`<b>À toi de jouer !</b> ${esc(oppName)} a ${S.racks[opp].length} tuiles.`;
@@ -521,7 +533,7 @@ function renderChat(){
   for(const m of chat){
     const d=document.createElement('div');d.className='m'+(m.from===me?' me':'');
     const sm=document.createElement('small');
-    sm.textContent=(S?.names[m.from]||(m.from===me?'Toi':'Amie'))+' · '+new Date(m.ts).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    sm.textContent=(S?.names[m.from]||(m.from===me?'Toi':'Adversaire'))+' · '+new Date(m.ts).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
     d.appendChild(sm);d.appendChild(document.createTextNode(m.text));box.appendChild(d);
   }
   box.scrollTop=box.scrollHeight;
@@ -561,10 +573,7 @@ function broadcastNew(){store();send({t:'state',state:S});beginTurn();render()}
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)return;
   document.title='Marinnikub';
-  if(!peer||connected)return;
-  if(peer.destroyed){role==='host'?startHost():startGuest();return}
-  if(peer.disconnected){try{peer.reconnect()}catch(e){}}
-  if(role==='guest')setTimeout(tryConnect,800);
+  lastAttempt=0;watchdog();
 });
 
 // ---------- Démarrage ----------
