@@ -261,7 +261,7 @@ const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))}catch(e){return
 function newGame(names){
   const deck=shuffle([...Array(106).keys()]);
   return{v:1,deck,racks:[deck.splice(0,14),deck.splice(0,14)],board:[],turn:Math.random()<.5?0:1,
-    melded:[false,false],names,passes:0,over:null,log:'Nouvelle manche !',game:(S?.game||0)+1,scores:S?.scores||[0,0],chatFrom:S?.chatFrom||0,
+    melded:[false,false],names,passes:0,over:null,log:'Nouvelle manche !',game:(S?.game||0)+1,round:(S?.round||0)+1,scores:S?.scores||[0,0],chatFrom:S?.chatFrom||0,
     seed:Math.random()};
 }
 // Quelle version de la partie est la plus récente ? (départage stable si les deux lancent une manche en même temps)
@@ -580,7 +580,7 @@ function render(){
   $('status').innerHTML=st+`<br><small style="color:var(--muted)">${esc(S.log||'')}</small>`;
   if(!document.hidden)document.title='Marinnikub';
   const sc=S.scores||[0,0];
-  $('score').textContent=`M${S.game||1} · ${S.names[0]} ${sc[0]} – ${sc[1]} ${S.names[1]||'Joueur 2'}`;
+  $('score').textContent=`M${S.round||1} ·${S.names[0]} ${sc[0]} – ${sc[1]} ${S.names[1]||'Joueur 2'}`;
 
   if(S.over){
     const w=S.over.winner;
@@ -641,7 +641,7 @@ $('resetAll').onclick=()=>{
   const b=$('resetAll');
   if(b.dataset.c!=='1'){b.dataset.c='1';b.textContent='Touche encore pour confirmer';return}
   b.dataset.c='';b.textContent='Nouvelle partie (scores à zéro)';
-  const g=S.game;S=newGame(S.names);S.scores=[0,0];S.game=g+1;S.chatFrom=Date.now();S.names[1-me]='';otherName=''; // chat vide, adversaire oublié
+  const g=S.game;S=newGame(S.names);S.scores=[0,0];S.game=g+1;S.chatFrom=Date.now();S.round=1;S.names[1-me]='';otherName=''; // chat vide, adversaire oublié
   broadcastNew();$('rules').classList.add('hidden');
 };
 function broadcastNew(){store();send({t:'state',state:S});relayState();beginTurn();render();renderChat()}
