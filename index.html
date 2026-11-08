@@ -577,7 +577,7 @@ function waitScreen(){
   $('lobbyForm').classList.add('hidden');$('lobbyWait').classList.remove('hidden');
   $('shareLink').value=shareUrl();
   $('copyBtn').onclick=()=>{navigator.clipboard?.writeText(shareUrl());$('copyBtn').textContent='Copié !'};
-  if(navigator.share){$('shareBtn').classList.remove('hidden');$('shareBtn').onclick=()=>navigator.share({title:'Marinnikub',text:'Viens jouer à Marinnikub avec moi !',url:shareUrl()}).catch(()=>{})}
+  if(navigator.share){$('shareBtn').classList.remove('hidden');$('shareBtn').onclick=()=>navigator.share({url:shareUrl()}).catch(()=>{})}
 }
 init();
 </script>
