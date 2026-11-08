@@ -255,7 +255,8 @@ let peer=null, conn=null, connected=false, unread=0;
 
 const $=id=>document.getElementById(id);
 const KEY='marinnikub-salon';
-const store=()=>{try{localStorage.setItem(KEY,JSON.stringify({role,me,myName,S,chat}))}catch(e){}};
+let otherName='';
+const store=()=>{try{localStorage.setItem(KEY,JSON.stringify({role,me,myName,otherName,S,chat}))}catch(e){}};
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))}catch(e){return null}};
 
 function newGame(names){
@@ -292,6 +293,7 @@ let lastStart=0,lastAttempt=0,lastSeen=0;
 const TOKEN=(()=>{const k='marinnikub-token';try{let t=localStorage.getItem(k);if(!t){t=Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,t)}return t}catch(e){return Math.random().toString(36).slice(2)}})();
 function startPeer(){
   lastStart=Date.now();
+  if(typeof Peer==='undefined')return;
   const p=new Peer(seatId(me),{...PEER_OPTS,token:TOKEN});peer=p;
   p.on('open',()=>{if(claiming){claiming=false;store()}tryConnect(true)});
   p.on('connection',c=>bindConn(c,false));
@@ -329,6 +331,9 @@ function bindConn(c,outgoing){
 function send(o){if(conn&&conn.open)try{conn.send(o)}catch(e){}}
 function watchdog(){
   if(!role)return;
+  if(!es||es.readyState===2)syncRelay();
+  if(pendingState||pendingChat.length)flushRelay();
+  if(typeof Peer==='undefined')return;
   if(conn&&conn.open){
     send({t:'ping'});
     // 75 s : un onglet en arrière-plan n'envoie plus qu'un signal par minute
@@ -341,10 +346,69 @@ function watchdog(){
   tryConnect();
 }
 setInterval(watchdog,4000);
-function setConn(on){
-  connected=on;
-  $('conn').classList.toggle('on',on);
-  $('conn').querySelector('span').textContent=on?'Connecté':(role==='host'?'En attente de ton adversaire':'Reconnexion…');
+function setConn(on){connected=on;updConn()}
+function updConn(){
+  $('conn').classList.toggle('on',connected||relayOk);
+  $('conn').querySelector('span').textContent=connected?'En direct':(relayOk?'Synchronisé':'Hors ligne');
+}
+
+// ---------- Relais ntfy.sh : coups et messages déposés, récupérés même en différé ----------
+// (conservés 12 h par le relais ; au-delà, le premier qui rouvre le jeu redépose la partie)
+const RELAY='https://ntfy.sh/',TOPIC='mkub-exjpeqh727zrv9qi4gvshizpit',TS=TOPIC+'-s',TC=TOPIC+'-c';
+let relayOk=false,es=null,relayLast='',relBest=null,pendingState=false,pendingChat=[],flushing=false,syncing=false;
+function validState(st){
+  try{
+    if(!st||!Array.isArray(st.racks)||st.racks.length!==2||!Array.isArray(st.board)||!Array.isArray(st.deck)||!Array.isArray(st.names))return false;
+    if(!Number.isFinite(st.v)||!Number.isFinite(st.game)||(st.turn!==0&&st.turn!==1))return false;
+    const all=[...st.racks[0],...st.racks[1],...st.board.flat(),...st.deck];
+    return all.length===106&&new Set(all).size===106&&all.every(x=>Number.isInteger(x)&&x>=0&&x<106);
+  }catch(e){return false}
+}
+let relayPause=0,relayTimer=null;
+async function post(topic,obj){
+  const r=await fetch(RELAY+topic,{method:'POST',body:JSON.stringify(obj)});
+  if(r.status===429)relayPause=Date.now()+30000; // le relais demande de ralentir
+  if(!r.ok)throw new Error(r.status);
+}
+// les coups enchaînés vite sont regroupés : seul le dernier état part
+function relayState(){pendingState=true;clearTimeout(relayTimer);relayTimer=setTimeout(flushRelay,1200)}
+function relayChat(m){pendingChat.push(m);flushRelay()}
+async function flushRelay(){
+  if(flushing||!role||Date.now()<relayPause)return;flushing=true;
+  try{
+    if(pendingState&&S){pendingState=false;try{await post(TS,{from:me,name:myName,state:S});if(!relBest||newer(S,relBest))relBest=S}catch(e){pendingState=true}}
+    while(pendingChat.length){try{await post(TC,{from:me,name:myName,m:pendingChat[0]});pendingChat.shift()}catch(e){break}}
+  }finally{flushing=false}
+}
+function handleRelay(ev){
+  if(!ev||ev.event!=='message'||typeof ev.message!=='string')return;
+  if(ev.id)relayLast=ev.id;
+  let o;try{o=JSON.parse(ev.message)}catch(e){return}
+  if(!o||typeof o!=='object')return;
+  if((o.from===0||o.from===1)&&o.from!==me&&typeof o.name==='string')setOther(o.name);
+  if(ev.topic===TS&&validState(o.state)){
+    if(!relBest||newer(o.state,relBest))relBest=o.state;
+    if(newer(o.state,S)){adopt(o.state);render()}
+  }else if(ev.topic===TC&&o.m)mergeChat([o.m]);
+}
+async function syncRelay(){
+  if(!role||syncing)return;syncing=true;
+  try{
+    const r=await fetch(RELAY+TS+','+TC+'/json?poll=1&since='+(relayLast||'12h'));
+    if(!r.ok)throw new Error(r.status);
+    for(const line of (await r.text()).split(String.fromCharCode(10))){if(line)try{handleRelay(JSON.parse(line))}catch(e){}}
+    relayOk=true;
+    // le relais a oublié la partie (ou ne l'a jamais eue) : on la redépose
+    if(S&&(!relBest||newer(S,relBest)))relayState();
+    if(pendingChat.length)flushRelay();
+  }catch(e){relayOk=false}
+  finally{syncing=false}
+  updConn();
+  if(es)es.close();
+  es=new EventSource(RELAY+TS+','+TC+'/sse?since='+(relayLast||Math.floor(Date.now()/1000)));
+  es.onmessage=e=>{try{handleRelay(JSON.parse(e.data))}catch(_){}};
+  es.onopen=()=>{relayOk=true;updConn()};
+  es.onerror=()=>{relayOk=false;updConn()};
 }
 function onData(d){
   if(!d||typeof d!=='object')return;
@@ -355,22 +419,24 @@ function onData(d){
   if(d.t==='hello'){
     mergeChat(d.chat);
     if(d.state&&newer(d.state,S))adopt(d.state);
-    if(role==='host'&&S&&typeof d.name==='string'&&(S.names[1]!==d.name.slice(0,20)||S.names[0]!==myName)){
-      S.names=[myName,d.name.slice(0,20)];S.v++;store();
-    }
+    if(typeof d.name==='string')setOther(d.name);
     if(role==='host')send({t:'state',state:S});
     render();
   }else if(d.t==='state'&&d.state){
     if(newer(d.state,S)){adopt(d.state);render()}
   }else if(d.t==='chat'&&d.m){mergeChat([d.m])}
 }
+function setOther(n){
+  n=String(n).slice(0,20);if(!n)return;otherName=n;
+  if(S&&S.names[1-me]!==n){S.names[1-me]=n;store();render()}
+}
 function adopt(st){
   const turnChanged=!S||S.turn!==st.turn||S.game!==st.game;
-  S=st;store();
+  S=st;S.names=[...S.names];S.names[me]=myName;if(otherName)S.names[1-me]=otherName;store();
   if(turnChanged||!work)beginTurn();
   if(S.turn===me&&!S.over&&document.hidden)document.title='🔔 À toi de jouer ! — Marinnikub';
 }
-function broadcast(){S.v++;store();send({t:'state',state:S});beginTurn();render()}
+function broadcast(){S.v++;store();send({t:'state',state:S});relayState();beginTurn();render()}
 
 // ---------- Tour ----------
 function beginTurn(){
@@ -551,7 +617,7 @@ function renderChat(){
 $('chatForm').onsubmit=e=>{
   e.preventDefault();const text=$('chatIn').value.trim();if(!text)return;
   const m={id:Math.random().toString(36).slice(2)+Date.now(),from:me,text,ts:Date.now()};
-  chat.push(m);store();send({t:'chat',m});$('chatIn').value='';renderChat();
+  chat.push(m);store();send({t:'chat',m});relayChat(m);$('chatIn').value='';renderChat();
 };
 $('chatToggle').onclick=()=>{$('chat').classList.remove('closed');unread=0;renderChat();$('chatIn').focus()};
 $('chatClose').onclick=()=>$('chat').classList.add('closed');
@@ -575,13 +641,13 @@ $('resetAll').onclick=()=>{
   b.dataset.c='';b.textContent='Nouvelle partie (scores à zéro)';
   const g=S.game;S=newGame(S.names);S.scores=[0,0];S.game=g+1;broadcastNew();$('rules').classList.add('hidden');
 };
-function broadcastNew(){store();send({t:'state',state:S});beginTurn();render()}
+function broadcastNew(){store();send({t:'state',state:S});relayState();beginTurn();render()}
 // Sur mobile, la connexion se coupe quand on change d'appli : on la relance au retour.
 // Retour dans l'appli : la liaison est souvent morte sans le dire. On la teste en 3 s.
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)return;
   document.title='Marinnikub';
-  lastAttempt=0;
+  lastAttempt=0;syncRelay();
   if(conn&&conn.open){
     const t=Date.now();send({t:'ping'});
     setTimeout(()=>{if(lastSeen<t&&conn){const c=conn;conn=null;setConn(false);try{c.close()}catch(_){};watchdog()}},3000);
@@ -591,13 +657,12 @@ document.addEventListener('visibilitychange',()=>{
 // ---------- Démarrage ----------
 function showGame(){$('lobby').classList.add('hidden');$('game').classList.remove('hidden');render();renderChat()}
 function init(){
-  if(typeof Peer==='undefined'){$('lobbyErr').textContent='Impossible de charger le module réseau. Vérifie ta connexion internet.';return}
   if(location.hash)history.replaceState(null,'',location.pathname);
   const saved=load();
   if(saved&&saved.role){
-    role=saved.role;me=saved.me;myName=saved.myName;S=saved.S;chat=saved.chat||[];
-    if(S)beginTurn();
-    role==='host'?startHost():startGuest();showGame();setConn(false);
+    role=saved.role;me=saved.me;myName=saved.myName;otherName=saved.otherName||'';S=saved.S;chat=saved.chat||[];
+    if(S){S.names[me]=myName;if(otherName)S.names[1-me]=otherName;beginTurn()}
+    role==='host'?startHost():startGuest();showGame();setConn(false);syncRelay();
     return;
   }
   $('nameIn').focus();
@@ -607,7 +672,7 @@ function init(){
     $('lobbyErr').textContent='';claiming=true;me=n;chat=[];
     if(n===0){role='host';S=newGame([myName,'']);beginTurn();startHost()}
     else{role='guest';S=null;startGuest()}
-    showGame();setConn(false);
+    showGame();setConn(false);syncRelay();
   };
   $('seat0').onclick=()=>pick(0);
   $('seat1').onclick=()=>pick(1);
