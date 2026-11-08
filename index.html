@@ -346,7 +346,7 @@ function watchdog(){
 }
 setInterval(watchdog,4000);
 // Filet de sécurité : la liaison au relais peut mourir sans prévenir sur mobile.
-setInterval(()=>{if(!document.hidden)syncRelay()},30000);
+setInterval(()=>{if(!document.hidden){syncRelay();checkUpdate()}},30000);
 function setConn(on){connected=on;updConn()}
 function updConn(){
   $('conn').classList.toggle('on',connected||relayOk);
@@ -372,7 +372,7 @@ async function post(topic,obj){
   if(!r.ok)throw new Error(r.status);
 }
 // les coups enchaînés vite sont regroupés : seul le dernier état part
-function relayState(){pendingState=true;clearTimeout(relayTimer);relayTimer=setTimeout(flushRelay,1200)}
+function relayState(){pendingState=true;clearTimeout(relayTimer);relayTimer=setTimeout(flushRelay,300)}
 function relayChat(m){pendingChat.push(m);flushRelay()}
 async function flushRelay(){
   if(flushing||!role||Date.now()<relayPause)return;flushing=true;
@@ -650,15 +650,37 @@ $('resetAll').onclick=()=>{
 function broadcastNew(){store();send({t:'state',state:S});relayState();beginTurn();render();renderChat()}
 // Sur mobile, la connexion se coupe quand on change d'appli : on la relance au retour.
 // Retour dans l'appli : la liaison est souvent morte sans le dire. On la teste en 3 s.
-document.addEventListener('visibilitychange',()=>{
-  if(document.hidden)return;
-  document.title='Marinnikub';
+let lastWake=0;
+function wake(){
+  if(document.hidden||Date.now()-lastWake<1500)return;lastWake=Date.now();
+  document.title='Marinnikub';checkUpdate();
   lastAttempt=0;syncRelay();
   if(conn&&conn.open){
     const t=Date.now();send({t:'ping'});
     setTimeout(()=>{if(lastSeen<t&&conn){const c=conn;conn=null;setConn(false);try{c.close()}catch(_){};watchdog()}},3000);
   }else watchdog();
-});
+}
+document.addEventListener('visibilitychange',wake);
+addEventListener('pageshow',wake);addEventListener('focus',wake);addEventListener('online',()=>{lastWake=0;wake()});
+
+// Mise à jour automatique : au retour dans le jeu, on recharge si une nouvelle version existe,
+// sauf en plein tour (tuiles posées non validées) ou message en cours d'écriture.
+const BUILD='2026-11-08b';let lastUpd=0;
+async function checkUpdate(){
+  if(Date.now()-lastUpd<60000)return;lastUpd=Date.now();
+  try{
+    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),8000);
+    const t=await (await fetch(location.pathname+'?u='+Date.now(),{cache:'no-store',signal:ac.signal})).text();clearTimeout(to);
+    const b=(t.match(/const BUILD='([^']+)'/)||[])[1];
+    if(!b||b===BUILD)return;
+    if(work&&myTurn()&&changed())return;
+    if($('chatIn').value.trim())return;
+    let tried='';try{tried=sessionStorage.getItem('mkub-upd')||''}catch(_){}
+    if(tried===b)return; // déjà tenté : pas de boucle de rechargement
+    try{sessionStorage.setItem('mkub-upd',b)}catch(_){}
+    store();location.reload();
+  }catch(e){}
+}
 
 // ---------- Démarrage ----------
 function showGame(){$('lobby').classList.add('hidden');$('game').classList.remove('hidden');render();renderChat()}
