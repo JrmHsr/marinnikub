@@ -262,7 +262,7 @@ const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))}catch(e){return
 function newGame(names){
   const deck=shuffle([...Array(106).keys()]);
   return{v:1,deck,racks:[deck.splice(0,14),deck.splice(0,14)],board:[],turn:Math.random()<.5?0:1,
-    melded:[false,false],names,passes:0,over:null,log:'Nouvelle manche !',game:(S?.game||0)+1,scores:S?.scores||[0,0],
+    melded:[false,false],names,passes:0,over:null,log:'Nouvelle manche !',game:(S?.game||0)+1,scores:S?.scores||[0,0],chatFrom:S?.chatFrom||0,
     seed:Math.random()};
 }
 // Quelle version de la partie est la plus récente ? (départage stable si les deux lancent une manche en même temps)
@@ -431,9 +431,10 @@ function setOther(n){
   if(S&&S.names[1-me]!==n){S.names[1-me]=n;store();render()}
 }
 function adopt(st){
-  const turnChanged=!S||S.turn!==st.turn||S.game!==st.game;
+  const turnChanged=!S||S.turn!==st.turn||S.game!==st.game,chatReset=(S?.chatFrom||0)!==(st.chatFrom||0);
   S=st;S.names=[...S.names];S.names[me]=myName;if(otherName)S.names[1-me]=otherName;store();
   if(turnChanged||!work)beginTurn();
+  if(chatReset)renderChat();
   if(S.turn===me&&!S.over&&document.hidden)document.title='🔔 À toi de jouer ! — Marinnikub';
 }
 function broadcast(){S.v++;store();send({t:'state',state:S});relayState();beginTurn();render()}
@@ -602,8 +603,9 @@ function mergeChat(list){
 }
 function renderChat(){
   const box=$('msgs');box.innerHTML='';
-  if(!chat.length){const d=document.createElement('div');d.className='m sys';d.textContent='Aucun message pour l\'instant. Dis bonjour 👋';box.appendChild(d)}
-  for(const m of chat){
+  const shown=chat.filter(m=>m.ts>=(S?.chatFrom||0));
+  if(!shown.length){const d=document.createElement('div');d.className='m sys';d.textContent='Aucun message pour l\'instant. Dis bonjour 👋';box.appendChild(d)}
+  for(const m of shown){
     const d=document.createElement('div');d.className='m'+(m.from===me?' me':'');
     const sm=document.createElement('small');
     sm.textContent=(S?.names[m.from]||(m.from===me?'Toi':'Adversaire'))+' · '+new Date(m.ts).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
@@ -639,9 +641,10 @@ $('resetAll').onclick=()=>{
   const b=$('resetAll');
   if(b.dataset.c!=='1'){b.dataset.c='1';b.textContent='Touche encore pour confirmer';return}
   b.dataset.c='';b.textContent='Nouvelle partie (scores à zéro)';
-  const g=S.game;S=newGame(S.names);S.scores=[0,0];S.game=g+1;broadcastNew();$('rules').classList.add('hidden');
+  const g=S.game;S=newGame(S.names);S.scores=[0,0];S.game=g+1;S.chatFrom=Date.now(); // repart aussi d'un chat vide
+  broadcastNew();$('rules').classList.add('hidden');
 };
-function broadcastNew(){store();send({t:'state',state:S});relayState();beginTurn();render()}
+function broadcastNew(){store();send({t:'state',state:S});relayState();beginTurn();render();renderChat()}
 // Sur mobile, la connexion se coupe quand on change d'appli : on la relance au retour.
 // Retour dans l'appli : la liaison est souvent morte sans le dire. On la teste en 3 s.
 document.addEventListener('visibilitychange',()=>{
