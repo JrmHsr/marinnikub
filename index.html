@@ -385,11 +385,12 @@ function handleRelay(ev){
   if(ev.id)relayLast=ev.id;
   let o;try{o=JSON.parse(ev.message)}catch(e){return}
   if(!o||typeof o!=='object')return;
-  if((o.from===0||o.from===1)&&o.from!==me&&typeof o.name==='string')setOther(o.name);
+  const fromOther=(o.from===0||o.from===1)&&o.from!==me&&typeof o.name==='string';
   if(ev.topic===TS&&validState(o.state)){
     if(!relBest||newer(o.state,relBest))relBest=o.state;
     if(newer(o.state,S)){adopt(o.state);render()}
-  }else if(ev.topic===TC&&o.m)mergeChat([o.m]);
+    if(fromOther&&!newer(S,o.state))setOther(o.name);
+  }else if(ev.topic===TC&&o.m){mergeChat([o.m]);if(fromOther&&o.m.ts>=(S?.chatFrom||0))setOther(o.name)}
 }
 async function syncRelay(){
   if(!role||syncing)return;syncing=true;
@@ -432,7 +433,7 @@ function setOther(n){
 }
 function adopt(st){
   const turnChanged=!S||S.turn!==st.turn||S.game!==st.game,chatReset=(S?.chatFrom||0)!==(st.chatFrom||0);
-  S=st;S.names=[...S.names];S.names[me]=myName;if(otherName)S.names[1-me]=otherName;store();
+  S=st;S.names=[...S.names];S.names[me]=myName;store();
   if(turnChanged||!work)beginTurn();
   if(chatReset)renderChat();
   if(S.turn===me&&!S.over&&document.hidden)document.title='🔔 À toi de jouer ! — Marinnikub';
@@ -580,7 +581,7 @@ function render(){
   $('status').innerHTML=st+`<br><small style="color:var(--muted)">${esc(S.log||'')}</small>`;
   if(!document.hidden)document.title='Marinnikub';
   const sc=S.scores||[0,0];
-  $('score').textContent=`M${S.game||1} · ${S.names[0]} ${sc[0]} – ${sc[1]} ${S.names[1]||'?'}`;
+  $('score').textContent=`M${S.game||1} · ${S.names[0]} ${sc[0]} – ${sc[1]} ${S.names[1]||'Joueur 2'}`;
 
   if(S.over){
     const w=S.over.winner;
@@ -641,7 +642,7 @@ $('resetAll').onclick=()=>{
   const b=$('resetAll');
   if(b.dataset.c!=='1'){b.dataset.c='1';b.textContent='Touche encore pour confirmer';return}
   b.dataset.c='';b.textContent='Nouvelle partie (scores à zéro)';
-  const g=S.game;S=newGame(S.names);S.scores=[0,0];S.game=g+1;S.chatFrom=Date.now(); // repart aussi d'un chat vide
+  const g=S.game;S=newGame(S.names);S.scores=[0,0];S.game=g+1;S.chatFrom=Date.now();S.names[1-me]='';otherName=''; // chat vide, adversaire oublié
   broadcastNew();$('rules').classList.add('hidden');
 };
 function broadcastNew(){store();send({t:'state',state:S});relayState();beginTurn();render();renderChat()}
@@ -664,7 +665,7 @@ function init(){
   const saved=load();
   if(saved&&saved.role){
     role=saved.role;me=saved.me;myName=saved.myName;otherName=saved.otherName||'';S=saved.S;chat=saved.chat||[];
-    if(S){S.names[me]=myName;if(otherName)S.names[1-me]=otherName;beginTurn()}
+    if(S){S.names[me]=myName;beginTurn()}
     role==='host'?startHost():startGuest();showGame();setConn(false);syncRelay();
     return;
   }
