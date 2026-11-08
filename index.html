@@ -261,7 +261,15 @@ const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))}catch(e){return
 function newGame(names){
   const deck=shuffle([...Array(106).keys()]);
   return{v:1,deck,racks:[deck.splice(0,14),deck.splice(0,14)],board:[],turn:Math.random()<.5?0:1,
-    melded:[false,false],names,passes:0,over:null,log:'Nouvelle manche !',game:(S?.game||0)+1,scores:S?.scores||[0,0]};
+    melded:[false,false],names,passes:0,over:null,log:'Nouvelle manche !',game:(S?.game||0)+1,scores:S?.scores||[0,0],
+    seed:Math.random()};
+}
+// Quelle version de la partie est la plus récente ? (départage stable si les deux lancent une manche en même temps)
+function newer(a,b){
+  if(!b)return true;
+  if(a.game!==b.game)return a.game>b.game;
+  if(a.v!==b.v)return a.v>b.v;
+  return (a.seed||0)>(b.seed||0);
 }
 
 // ---------- Réseau (PeerJS, pair-à-pair) ----------
@@ -328,12 +336,14 @@ function onData(d){
   if(d.t==='ping')return;
   if(d.t==='hello'){
     mergeChat(d.chat);
-    if(d.state&&(!S||d.state.game>S.game||(d.state.game===S.game&&d.state.v>S.v)))adopt(d.state);
-    if(role==='host'&&S&&typeof d.name==='string'&&S.names[1]!==d.name){S.names[1]=d.name.slice(0,20);S.v++;store();}
+    if(d.state&&newer(d.state,S))adopt(d.state);
+    if(role==='host'&&S&&typeof d.name==='string'&&(S.names[1]!==d.name.slice(0,20)||S.names[0]!==myName)){
+      S.names=[myName,d.name.slice(0,20)];S.v++;store();
+    }
     if(role==='host')send({t:'state',state:S});
     render();
   }else if(d.t==='state'&&d.state){
-    if(!S||d.state.game>S.game||(d.state.game===S.game&&d.state.v>S.v)){adopt(d.state);render()}
+    if(newer(d.state,S)){adopt(d.state);render()}
   }else if(d.t==='chat'&&d.m){mergeChat([d.m])}
 }
 function adopt(st){
